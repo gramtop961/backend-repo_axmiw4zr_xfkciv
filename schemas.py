@@ -1,48 +1,53 @@
 """
-Database Schemas
+Database Schemas for Smart Access System - Facilities Management
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
-
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+Each Pydantic model represents a collection in MongoDB. The collection
+name is the lowercase of the class name.
 """
-
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Literal
+from datetime import datetime
 
-# Example schemas (replace with your own):
-
-class User(BaseModel):
+class Facility(BaseModel):
     """
-    Users collection schema
-    Collection name: "user" (lowercase of class name)
+    Facilities collection schema
+    Collection name: "facility"
     """
-    name: str = Field(..., description="Full name")
-    email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
-    is_active: bool = Field(True, description="Whether user is active")
+    name: str = Field(..., description="Facility display name")
+    code: str = Field(..., description="Short code/identifier (unique)")
+    location: Optional[str] = Field(None, description="Location / Floor detail")
+    capacity: Optional[int] = Field(None, description="Optional capacity for information only")
+    type: Literal[
+        "meeting_room",
+        "discussion_room",
+        "banquet_hall",
+        "gym",
+        "training_centre",
+        "studio",
+        "badminton_court",
+        "multipurpose_court",
+        "football_field",
+        "netball_court"
+    ]
+    is_active: bool = True
 
-class Product(BaseModel):
+class Booking(BaseModel):
     """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
+    Bookings collection schema
+    Collection name: "booking"
     """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+    facility_id: str = Field(..., description="MongoDB ObjectId (string) of facility")
+    facility_code: str = Field(..., description="Duplicate of code for quick lookup")
+    user_name: str
+    user_email: str
+    purpose: Optional[str] = None
+    date: str = Field(..., description="ISO date YYYY-MM-DD")
+    start_time: str = Field(..., description="HH:MM 24h")
+    end_time: str = Field(..., description="HH:MM 24h")
+    status: Literal["pending", "approved", "rejected", "cancelled", "no_show"] = "pending"
+    access_code: Optional[str] = Field(None, description="Code used at entry gates")
+    checked_in_at: Optional[datetime] = None
 
-# Add your own schemas here:
-# --------------------------------------------------
-
-# Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+class AdminAction(BaseModel):
+    action: Literal["approve", "reject"]
+    note: Optional[str] = None
