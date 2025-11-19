@@ -194,8 +194,9 @@ def availability(facility_code: str = Query(...), date_str: str = Query(..., ali
 
 class CreateBooking(BaseModel):
     facility_code: str
+    user_id: str
     user_name: str
-    user_email: str
+    user_email: Optional[str] = None  # optional for backward compatibility
     purpose: Optional[str] = None
     date: str  # YYYY-MM-DD
     start_time: str  # HH:MM
@@ -209,14 +210,16 @@ def notify_admin_new_booking(data: Dict[str, Any]):
     <h3>New Booking Request</h3>
     <p><b>Facility:</b> {data['facility_code']}</p>
     <p><b>Date:</b> {data['date']} {data['start_time']}-{data['end_time']}</p>
-    <p><b>User:</b> {data['user_name']} ({data['user_email']})</p>
+    <p><b>User:</b> {data['user_name']} (ID: {data.get('user_id','-')})</p>
     <p><b>Purpose:</b> {data.get('purpose','-')}</p>
     <p>Please review in the admin panel.</p>
     """
     send_email(admin_email, subject, body)
 
 
-def notify_user_status(email: str, status: str, facility_code: str, date_str: str, start: str, end: str, access_code: Optional[str]):
+def notify_user_status(email: Optional[str], status: str, facility_code: str, date_str: str, start: str, end: str, access_code: Optional[str]):
+    if not email:
+        return  # no email available; skip
     subject = f"Your booking has been {status}"
     code_html = f"<p><b>Access code:</b> {access_code}</p>" if access_code else ""
     body = f"""
@@ -255,9 +258,13 @@ def create_booking(payload: CreateBooking, background_tasks: BackgroundTasks):
         date=payload.date,
         start_time=payload.start_time,
         end_time=payload.end_time,
-        status="pending"
+        status="pending",
+        # extra dynamic fields supported by create_document
     )
-    booking_id = create_document("booking", booking)
+    # add user_id into dict (even if model doesn't define field strictly, create_document stores dict)
+    data = booking.model_dump()
+    data["user_id"] = payload.user_id
+    booking_id = create_document("booking", data)
 
     background_tasks.add_task(notify_admin_new_booking, {**payload.model_dump(), "_id": booking_id})
 
@@ -265,8 +272,15 @@ def create_booking(payload: CreateBooking, background_tasks: BackgroundTasks):
 
 
 @app.get("/api/bookings/mine")
-def my_bookings(email: str = Query(...)):
-    rows = list(db["booking"].find({"user_email": email}).sort("date", 1))
+def my_bookings(email: Optional[str] = Query(None), user_id: Optional[str] = Query(None)):
+    if not email and not user_id:
+        raise HTTPException(status_code=400, detail="Provide user_id or email")
+    query: Dict[str, Any] = {}
+    if user_id:
+        query["user_id"] = user_id
+    else:
+        query["user_email"] = email
+    rows = list(db["booking"].find(query).sort("date", 1))
     for r in rows:
         r["_id"] = oid_str(r["_id"])
     return rows
@@ -294,11 +308,11 @@ def admin_action(booking_id: str, action: AdminAction):
     if action.action == "approve":
         access_code = os.urandom(3).hex().upper()
         db["booking"].update_one({"_id": _id}, {"$set": {"status": "approved", "access_code": access_code}})
-        notify_user_status(b["user_email"], "approved", b["facility_code"], b["date"], b["start_time"], b["end_time"], access_code)
+        notify_user_status(b.get("user_email"), "approved", b["facility_code"], b["date"], b["start_time"], b["end_time"], access_code)
         return {"message": "Approved"}
     else:
         db["booking"].update_one({"_id": _id}, {"$set": {"status": "rejected"}})
-        notify_user_status(b["user_email"], "rejected", b["facility_code"], b["date"], b["start_time"], b["end_time"], None)
+        notify_user_status(b.get("user_email"), "rejected", b["facility_code"], b["date"], b["start_time"], b["end_time"], None)
         return {"message": "Rejected"}
 
 
